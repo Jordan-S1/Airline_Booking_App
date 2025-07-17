@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: airline-booking-system
+
+  datasource:
+    url: jdbc:postgresql://localhost:5332/airline_booking
+    username: airline_user
+    password: airline_password
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true

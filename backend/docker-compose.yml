@@ -1,0 +1,21 @@
+services:
+  db:
+    container_name: airline-booking-system
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: airline_user
+      POSTGRES_PASSWORD: airline_password
+      PGDATA: /data/postgres
+    volumes:
+      - db:/data/postgres
+    ports:
+      - "5332:5432"
+    networks:
+      - db
+    restart: unless-stopped
+
+networks:
+  db:
+    driver: bridge
+volumes:
+  db:
