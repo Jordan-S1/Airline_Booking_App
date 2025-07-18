@@ -68,13 +68,13 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
     );
 
     /**
-     * Retrieves all flights operated by a specific airline.
+     * Retrieves all flights operated by a specific airline using airline code.
      *
-     * @param airlineId the ID of the airline
+     * @param airlineCode the code of the airline
      * @return a list of flights operated by the specified airline
      */
-    @Query("SELECT f FROM Flight f WHERE f.airline.id = :airlineId")
-    List<Flight> findByAirlineId(@Param("airlineId") Long airlineId);
+    @Query("SELECT f FROM Flight f WHERE f.airline.code = :airlineCode AND f.active = true")
+    List<Flight> findByAirlineCode(@Param("airlineCode") String airlineCode);
 
     /**
      * Retrieves all upcoming active flights after the specified datetime.

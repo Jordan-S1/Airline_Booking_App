@@ -94,8 +94,15 @@ public class FlightService {
      *
      * @param flight the flight to create
      * @return the created flight with assigned ID
+     * @throws RuntimeException if flight data is invalid
      */
     public Flight createFlight(Flight flight) {
+        // Check for duplicate flight numbers
+        if (flight.getFlightNumber() != null &&
+                flightRepository.findByFlightNumber(flight.getFlightNumber()).isPresent()) {
+            throw new RuntimeException("Flight number already exists: " + flight.getFlightNumber());
+        }
+        log.info("Successfully created flight with ID: {}", flight.getId());
         return flightRepository.save(flight);
     }
 
@@ -118,6 +125,7 @@ public class FlightService {
         flight.setAvailableSeats(flightDetails.getAvailableSeats());
         flight.setStatus(flightDetails.getStatus());
 
+        log.info("Successfully updated flight with ID: {}", id);
         return flightRepository.save(flight);
     }
 
@@ -125,10 +133,16 @@ public class FlightService {
      * Deletes a flight from the system.
      *
      * @param id the ID of the flight to delete
+     * @throws RuntimeException if flight is not found
      */
     public void deleteFlight(Long id) {
         log.info("Deleting flight with ID: {}", id);
+        // Check if a flight exists before deletion
+        if (!flightRepository.existsById(id)) {
+            throw new RuntimeException("Flight not found with ID: " + id);
+        }
         flightRepository.deleteById(id);
+        log.info("Successfully deleted flight with ID: {}", id);
     }
 
     /**
@@ -143,6 +157,28 @@ public class FlightService {
                 .map(this::mapToFlightSearchResponse)
                 .collect(Collectors.toList());
 
+    }
+
+    /**
+     * Retrieves all flights operated by a specific airline using airline code.
+     *
+     * @param airlineCode the code of the airline (e.g., "AA", "DL", "UA")
+     * @return a list of flights operated by the specified airline
+     * @throws RuntimeException if the airline is not found
+     */
+    public List<FlightSearchResponse> getFlightsByAirlineCode(String airlineCode) {
+
+        String normalizedCode = airlineCode.toUpperCase();
+        log.info("Fetching flights for airline code: {}", normalizedCode);
+
+        List<Flight> flights = flightRepository.findByAirlineCode(normalizedCode);
+
+        List<FlightSearchResponse> results = flights.stream()
+                .map(this::mapToFlightSearchResponse)
+                .collect(Collectors.toList());
+
+        log.info("Found {} flights for airline code: {}", results.size(), normalizedCode);
+        return results;
     }
 
     /**

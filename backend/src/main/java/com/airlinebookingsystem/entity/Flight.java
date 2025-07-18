@@ -14,7 +14,7 @@ import java.util.Set;
 
 /**
  * Entity representing a flight in the airline booking system.
- * This class contains comprehensive information about a flight including its schedule,
+ * This class contains comprehensive information about a flight, including its schedule,
  * capacity, pricing, and current status. It maintains relationships with airlines,
  * airports, and bookings, while tracking seat availability across different classes.
  *
@@ -60,7 +60,7 @@ public class Flight {
     private Integer duration;
 
     /**
-     * Base price for the flight, used as reference for pricing calculations.
+     * Base price for the flight, used as a reference for pricing calculations.
      */
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal basePrice;
@@ -96,7 +96,7 @@ public class Flight {
     private BigDecimal businessPrice;
 
     /**
-     * Price for first class seats.
+     * Price for first-class seats.
      */
     @Column(precision = 10, scale = 2)
     private BigDecimal firstClassPrice;
@@ -137,7 +137,7 @@ public class Flight {
      * Enum representing the possible states of a flight.
      * SCHEDULED: Flight is planned and on schedule
      * DELAYED: Flight is delayed from its original schedule
-     * CANCELLED: Flight has been cancelled
+     * CANCELLED: Flight has been canceled
      * BOARDING: Passengers are currently boarding
      * DEPARTED: Flight has left the departure airport
      * ARRIVED: Flight has reached its destination
