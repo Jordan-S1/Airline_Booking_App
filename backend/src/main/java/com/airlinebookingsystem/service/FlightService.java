@@ -2,6 +2,7 @@ package com.airlinebookingsystem.service;
 
 import com.airlinebookingsystem.dto.FlightSearchRequest;
 import com.airlinebookingsystem.dto.FlightSearchResponse;
+import com.airlinebookingsystem.dto.FlightSearchResult;
 import com.airlinebookingsystem.entity.Airport;
 import com.airlinebookingsystem.entity.Flight;
 import com.airlinebookingsystem.repository.AirportRepository;
@@ -11,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -61,32 +64,161 @@ public class FlightService {
 
     /**
      * Searches for available flights based on search criteria.
+     * Supports both one-way and round-trip searches.
      *
      * @param request the search criteria including departure airport, arrival airport, and date
-     * @return a list of flights matching the search criteria
+     * @return FlightSearchResult containing outbound flights and optional return flights
      * @throws RuntimeException if departure or arrival airport is not found
      */
-    public List<FlightSearchResponse> searchFlights(FlightSearchRequest request) {
-        log.info("Searching flights from {} to {} on {}",
-                request.getDepartureAirport(),
-                request.getArrivalAirport(),
-                request.getDepartureDate());
+    public FlightSearchResult searchFlights(FlightSearchRequest request) {
+        log.info("Searching flights from {} to {} on {} for {} passengers in {} class",
+                request.departureAirport(),
+                request.arrivalAirport(),
+                request.departureDate(),
+                request.passengers() != null ? request.passengers() : 1,
+                request.seatClass() != null ? request.seatClass() : "ECONOMY");
 
-        Airport departure = airportRepository.findByCode(request.getDepartureAirport())
-                .orElseThrow(() -> new RuntimeException("Departure airport not found"));
+        // Search outbound flights
+        List<FlightSearchResponse> outboundFlights = searchFlightsOneWay(
+                request.departureAirport(),
+                request.arrivalAirport(),
+                request.departureDate(),
+                request.passengers(),
+                request.seatClass(),
+                request.directFlightsOnly()
+        );
 
-        Airport arrival = airportRepository.findByCode(request.getArrivalAirport())
-                .orElseThrow(() -> new RuntimeException("Arrival airport not found"));
+        List<FlightSearchResponse> returnFlights = null;
+        boolean isRoundTrip = request.returnDate() != null;
 
-        LocalDateTime departureDateTime = request.getDepartureDate().atStartOfDay();
+        // Search return flights if return date is provided
+        if (isRoundTrip) {
+            log.info("Searching return flights from {} to {} on {}",
+                    request.arrivalAirport(),
+                    request.departureAirport(),
+                    request.returnDate());
+
+            returnFlights = searchFlightsOneWay(
+                    request.arrivalAirport(),      // Swap departure/arrival for return
+                    request.departureAirport(),
+                    request.returnDate(),
+                    request.passengers(),
+                    request.seatClass(),
+                    request.directFlightsOnly()
+            );
+        }
+        log.info("Found {} outbound flights{}", outboundFlights.size(),
+                isRoundTrip ? " and " + (returnFlights != null ? returnFlights.size() : 0) + " return flights" : "");
+
+        return new FlightSearchResult(outboundFlights, returnFlights, isRoundTrip);
+    }
+
+    /**
+     * Searches for one-way flights with the specified criteria.
+     *
+     * @param departureCode the departure airport code
+     * @param arrivalCode the arrival airport code
+     * @param departureDate the departure date
+     * @param passengers number of passengers (nullable)
+     * @param seatClass seat class preference (nullable)
+     * @param directFlightsOnly whether to show only direct flights (nullable)
+     * @return list of available flights matching the criteria
+     */
+    private List<FlightSearchResponse> searchFlightsOneWay(
+            String departureCode,
+            String arrivalCode,
+            LocalDate departureDate,
+            Integer passengers,
+            String seatClass,
+            Boolean directFlightsOnly) {
+
+        Airport departure = airportRepository.findByCode(departureCode)
+                .orElseThrow(() -> new RuntimeException("Departure airport not found: " + departureCode));
+
+        Airport arrival = airportRepository.findByCode(arrivalCode)
+                .orElseThrow(() -> new RuntimeException("Arrival airport not found: " + arrivalCode));
+
+        LocalDateTime departureDateTime = departureDate.atStartOfDay();
 
         List<Flight> flights = flightRepository.findAvailableFlights(
                 departure, arrival, departureDateTime);
 
+        int passengerCount = passengers != null ? passengers : 1;
+        String seatClassFinal = seatClass != null ? seatClass : "ECONOMY";
+        boolean directOnly = directFlightsOnly != null ? directFlightsOnly : false;
+
         return flights.stream()
-                .filter(flight -> flight.getAvailableSeats() >= request.getPassengers())
-                .map(this::mapToFlightSearchResponse)
+                .filter(flight -> hasEnoughSeats(flight, passengerCount, seatClassFinal))
+                .filter(flight -> !directOnly || isDirect(flight))
+                .map(flight -> mapToFlightSearchResponse(flight, seatClassFinal))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Checks if a flight has enough available seats for the requested number of passengers
+     * in the specified seat class.
+     *
+     * @param flight the flight to check
+     * @param passengers number of passengers
+     * @param seatClass the requested seat class
+     * @return true if enough seats are available, false otherwise
+     */
+    private boolean hasEnoughSeats(Flight flight, int passengers, String seatClass) {
+        return switch (seatClass.toUpperCase()) {
+            case "ECONOMY" -> flight.getEconomySeats() >= passengers;
+            case "BUSINESS" -> flight.getBusinessSeats() >= passengers;
+            case "FIRST" -> flight.getFirstClassSeats() >= passengers;
+            default -> flight.getAvailableSeats() >= passengers;
+        };
+    }
+
+    /**
+     * Checks if a flight is a direct flight.
+     * Currently, assumes all flights are direct.
+     *
+     * @param flight the flight to check
+     * @return true if the flight is direct, false otherwise
+     */
+    private boolean isDirect(Flight flight) {
+        // ToDo Implement direct flight logic
+        // This could check for connecting flights, stops, etc.
+        // For now, assuming all flights are direct
+        return true;
+    }
+
+    /**
+     * Gets the price for a specific seat class, with fallback logic.
+     *
+     * @param flight the flight
+     * @param seatClass the seat class
+     * @return the price for the specified seat class
+     */
+    private BigDecimal getPriceForSeatClass(Flight flight, String seatClass) {
+        return switch (seatClass.toUpperCase()) {
+            case "ECONOMY" -> flight.getEconomyPrice() != null ?
+                    flight.getEconomyPrice() : flight.getBasePrice();
+            case "BUSINESS" -> flight.getBusinessPrice() != null ?
+                    flight.getBusinessPrice() : flight.getBasePrice().multiply(BigDecimal.valueOf(2));
+            case "FIRST" -> flight.getFirstClassPrice() != null ?
+                    flight.getFirstClassPrice() : flight.getBasePrice().multiply(BigDecimal.valueOf(3));
+            default -> flight.getBasePrice();
+        };
+    }
+
+    /**
+     * Gets the number of available seats for a specific class.
+     *
+     * @param flight the flight
+     * @param seatClass the seat class
+     * @return the number of available seats in the specified class
+     */
+    private Integer getAvailableSeatsForClass(Flight flight, String seatClass) {
+        return switch (seatClass.toUpperCase()) {
+            case "ECONOMY" -> flight.getEconomySeats();
+            case "BUSINESS" -> flight.getBusinessSeats();
+            case "FIRST" -> flight.getFirstClassSeats();
+            default -> flight.getAvailableSeats();
+        };
     }
 
     /**
@@ -102,7 +234,7 @@ public class FlightService {
                 flightRepository.findByFlightNumber(flight.getFlightNumber()).isPresent()) {
             throw new RuntimeException("Flight number already exists: " + flight.getFlightNumber());
         }
-        log.info("Successfully created flight with ID: {}", flight.getId());
+        log.info("Successfully created new flight: {}", flight.getFlightNumber());
         return flightRepository.save(flight);
     }
 
@@ -154,7 +286,7 @@ public class FlightService {
         LocalDateTime now = LocalDateTime.now();
         log.info("Fetching upcoming flights after: {}", now);
         return flightRepository.findUpcomingFlights(now).stream()
-                .map(this::mapToFlightSearchResponse)
+                .map(flight -> mapToFlightSearchResponse(flight, "ECONOMY"))
                 .collect(Collectors.toList());
 
     }
@@ -174,7 +306,7 @@ public class FlightService {
         List<Flight> flights = flightRepository.findByAirlineCode(normalizedCode);
 
         List<FlightSearchResponse> results = flights.stream()
-                .map(this::mapToFlightSearchResponse)
+                .map(flight -> mapToFlightSearchResponse(flight, "ECONOMY"))
                 .collect(Collectors.toList());
 
         log.info("Found {} flights for airline code: {}", results.size(), normalizedCode);
@@ -187,26 +319,23 @@ public class FlightService {
      * @param flight the flight entity to map
      * @return the mapped FlightSearchResponse
      */
-    private FlightSearchResponse mapToFlightSearchResponse(Flight flight) {
-        FlightSearchResponse response = new FlightSearchResponse();
-        response.setId(flight.getId());
-        response.setFlightNumber(flight.getFlightNumber());
-        response.setAirlineName(flight.getAirline().getName());
-        response.setAirlineCode(flight.getAirline().getCode());
-        response.setDepartureAirport(flight.getDepartureAirport().getCode());
-        response.setArrivalAirport(flight.getArrivalAirport().getCode());
-        response.setDepartureCity(flight.getDepartureAirport().getCity());
-        response.setArrivalCity(flight.getArrivalAirport().getCity());
-        response.setDepartureTime(flight.getDepartureTime());
-        response.setArrivalTime(flight.getArrivalTime());
-        response.setDuration(flight.getDuration());
-        response.setPrice(flight.getBasePrice());
-        response.setAvailableSeats(flight.getAvailableSeats());
-        response.setAircraft(flight.getAircraft());
-
-        return response;
-
+    private FlightSearchResponse mapToFlightSearchResponse(Flight flight, String seatClass) {
+        BigDecimal price = getPriceForSeatClass(flight, seatClass);
+        return new FlightSearchResponse(
+                flight.getId(),
+                flight.getFlightNumber(),
+                flight.getAirline().getName(),
+                flight.getAirline().getCode(),
+                flight.getDepartureAirport().getCode(),
+                flight.getArrivalAirport().getCode(),
+                flight.getDepartureAirport().getCity(),
+                flight.getArrivalAirport().getCity(),
+                flight.getDepartureTime(),
+                flight.getArrivalTime(),
+                flight.getDuration(),
+                price,
+                getAvailableSeatsForClass(flight, seatClass),
+                flight.getAircraft()
+        );
     }
-
-
 }
