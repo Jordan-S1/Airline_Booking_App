@@ -48,10 +48,8 @@ public class BookingService {
         Flight flight = flightRepository.findById(request.flightId())
                 .orElseThrow(() -> new RuntimeException("Flight not found"));
 
-        // Check seat availability
-        if (flight.getAvailableSeats() < request.passengers().size()) {
-            throw new RuntimeException("Insufficient seats available");
-        }
+        // Check seat availability based on seat class
+        validateSeatAvailability(flight, request.seatClass(), request.passengers().size());
 
         // Calculate total amount based on seat class
         BigDecimal totalAmount = calculateTotalAmount(flight, request.seatClass(), request.passengers().size());
@@ -70,16 +68,23 @@ public class BookingService {
         // Save booking first to get ID
         booking = bookingRepository.save(booking);
 
-        // Create passengers using PassengerService
-        List<PassengerResponse> createdPassengers = passengerService.createPassengers(request.passengers(), booking.getId());
-        log.info("Created {} passengers for booking {}", createdPassengers.size(), booking.getBookingReference());
+        try {
+            // Create passengers using PassengerService
+            List<PassengerResponse> createdPassengers = passengerService.createPassengers(request.passengers(), booking.getId());
+            log.info("Created {} passengers for booking {}", createdPassengers.size(), booking.getBookingReference());
 
-        // Update flight availability
-        flight.setAvailableSeats(flight.getAvailableSeats() - request.passengers().size());
-        flightRepository.save(flight);
+            // Update flight availability based on seat class
+            updateFlightSeatAvailability(flight, request.seatClass(), request.passengers().size(), false);
+            flightRepository.save(flight);
 
-        log.info("Booking created successfully with reference: {}", booking.getBookingReference());
-        return mapToBookingResponse(booking);
+            log.info("Booking created successfully with reference: {}", booking.getBookingReference());
+            return mapToBookingResponse(booking);
+        } catch (Exception e) {
+            // Rollback booking creation if passenger creation fails
+            log.error("Error creating passengers for booking {}, rolling back", booking.getBookingReference(), e);
+            bookingRepository.delete(booking);
+            throw new RuntimeException("Failed to create booking: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -122,9 +127,18 @@ public class BookingService {
         Booking booking = bookingRepository.findByBookingReference(bookingReference)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
+        if (booking.getStatus() == Booking.BookingStatus.CONFIRMED) {
+            log.warn("Booking {} is already confirmed", bookingReference);
+            return mapToBookingResponse(booking);
+        }
+        if (booking.getStatus() == Booking.BookingStatus.CANCELLED) {
+            throw new RuntimeException("Cannot confirm a cancelled booking");
+        }
+
         booking.setStatus(Booking.BookingStatus.CONFIRMED);
         booking = bookingRepository.save(booking);
 
+        log.info("Booking {} confirmed successfully", bookingReference);
         return mapToBookingResponse(booking);
     }
 
@@ -150,9 +164,10 @@ public class BookingService {
 
         // Restore flight seat availability
         Flight flight = booking.getFlight();
-        flight.setAvailableSeats(flight.getAvailableSeats() + booking.getNumberOfPassengers());
+        updateFlightSeatAvailability(flight, booking.getSeatClass().name(), booking.getNumberOfPassengers(), true);
         flightRepository.save(flight);
 
+        log.info("Booking {} cancelled successfully", bookingReference);
         return mapToBookingResponse(booking);
     }
 
@@ -182,6 +197,86 @@ public class BookingService {
         Booking booking = bookingRepository.findByBookingReference(bookingReference)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
         return passengerService.getPassengersByBookingId(booking.getId());
+    }
+
+    /**
+     * Updates an existing booking (limited updates allowed).
+     *
+     * @param bookingReference the booking reference to update
+     * @param request new booking details
+     * @return updated BookingResponse
+     */
+    public BookingResponse updateBooking(String bookingReference, BookingRequest request) {
+        log.info("Updating booking with reference: {}", bookingReference);
+
+        Booking booking = bookingRepository.findByBookingReference(bookingReference)
+                .orElseThrow(() -> new RuntimeException("Booking not found with reference: " + bookingReference));
+
+        // Only allow updates for pending bookings
+        if (booking.getStatus() != Booking.BookingStatus.PENDING) {
+            throw new RuntimeException("Can only update pending bookings");
+        }
+
+        // Update seat class if changed
+        if (!booking.getSeatClass().name().equals(request.seatClass().toUpperCase())) {
+            // Restore old seat availability and check new seat availability
+            Flight flight = booking.getFlight();
+            updateFlightSeatAvailability(flight, booking.getSeatClass().name(), booking.getNumberOfPassengers(), true);
+            validateSeatAvailability(flight, request.seatClass(), request.passengers().size());
+            updateFlightSeatAvailability(flight, request.seatClass(), request.passengers().size(), false);
+
+            booking.setSeatClass(Booking.SeatClass.valueOf(request.seatClass().toUpperCase()));
+            booking.setTotalAmount(calculateTotalAmount(flight, request.seatClass(), request.passengers().size()));
+
+            flightRepository.save(flight);
+        }
+
+        booking = bookingRepository.save(booking);
+        log.info("Booking {} updated successfully", bookingReference);
+        return mapToBookingResponse(booking);
+    }
+
+    /**
+     * Validates seat availability for a specific seat class.
+     */
+    private void validateSeatAvailability(Flight flight, String seatClass, int requiredSeats) {
+        int availableSeats = switch (seatClass.toUpperCase()) {
+            case "ECONOMY" -> flight.getEconomySeats() != null ? flight.getEconomySeats() : 0;
+            case "BUSINESS" -> flight.getBusinessSeats() != null ? flight.getBusinessSeats() : 0;
+            case "FIRST" -> flight.getFirstClassSeats() != null ? flight.getFirstClassSeats() : 0;
+            default -> flight.getAvailableSeats() != null ? flight.getAvailableSeats() : 0;
+        };
+
+        if (availableSeats < requiredSeats) {
+            throw new RuntimeException(String.format("Insufficient %s class seats available. Required: %d, Available: %d",
+                    seatClass.toLowerCase(), requiredSeats, availableSeats));
+        }
+    }
+
+    /**
+     * Updates flight seat availability based on seat class.
+     */
+    private void updateFlightSeatAvailability(Flight flight, String seatClass, int seatCount, boolean restore) {
+        int change = restore ? seatCount : -seatCount;
+
+        switch (seatClass.toUpperCase()) {
+            case "ECONOMY" -> {
+                int newCount = (flight.getEconomySeats() != null ? flight.getEconomySeats() : 0) + change;
+                flight.setEconomySeats(Math.max(0, newCount));
+            }
+            case "BUSINESS" -> {
+                int newCount = (flight.getBusinessSeats() != null ? flight.getBusinessSeats() : 0) + change;
+                flight.setBusinessSeats(Math.max(0, newCount));
+            }
+            case "FIRST" -> {
+                int newCount = (flight.getFirstClassSeats() != null ? flight.getFirstClassSeats() : 0) + change;
+                flight.setFirstClassSeats(Math.max(0, newCount));
+            }
+            default -> {
+                int newCount = (flight.getAvailableSeats() != null ? flight.getAvailableSeats() : 0) + change;
+                flight.setAvailableSeats(Math.max(0, newCount));
+            }
+        }
     }
 
     /**
