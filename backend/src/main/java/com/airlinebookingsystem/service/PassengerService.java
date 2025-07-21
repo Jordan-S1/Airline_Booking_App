@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -44,14 +43,14 @@ public class PassengerService {
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
         Passenger passenger = Passenger.builder()
-                .firstName(passengerRequest.getFirstName())
-                .lastName(passengerRequest.getLastName())
-                .dateOfBirth(passengerRequest.getDateOfBirth())
-                .gender(Passenger.Gender.valueOf(passengerRequest.getGender().toUpperCase()))
-                .passportNumber(passengerRequest.getPassportNumber())
-                .nationality(passengerRequest.getNationality())
-                .passengerType(passengerRequest.getPassengerType() != null ? 
-                              Passenger.PassengerType.valueOf(passengerRequest.getPassengerType().toUpperCase()) : 
+                .firstName(passengerRequest.firstName())
+                .lastName(passengerRequest.lastName())
+                .dateOfBirth(passengerRequest.dateOfBirth())
+                .gender(Passenger.Gender.valueOf(passengerRequest.gender().toUpperCase()))
+                .passportNumber(passengerRequest.passportNumber())
+                .nationality(passengerRequest.nationality())
+                .passengerType(passengerRequest.passengerType() != null ?
+                              Passenger.PassengerType.valueOf(passengerRequest.passengerType().toUpperCase()) :
                               Passenger.PassengerType.ADULT)
                 .booking(booking)
                 .build();
@@ -146,15 +145,15 @@ public class PassengerService {
         Passenger passenger = passengerRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Passenger not found"));
 
-        passenger.setFirstName(passengerRequest.getFirstName());
-        passenger.setLastName(passengerRequest.getLastName());
-        passenger.setDateOfBirth(passengerRequest.getDateOfBirth());
-        passenger.setGender(Passenger.Gender.valueOf(passengerRequest.getGender().toUpperCase()));
-        passenger.setPassportNumber(passengerRequest.getPassportNumber());
-        passenger.setNationality(passengerRequest.getNationality());
+        passenger.setFirstName(passengerRequest.firstName());
+        passenger.setLastName(passengerRequest.lastName());
+        passenger.setDateOfBirth(passengerRequest.dateOfBirth());
+        passenger.setGender(Passenger.Gender.valueOf(passengerRequest.gender().toUpperCase()));
+        passenger.setPassportNumber(passengerRequest.passportNumber());
+        passenger.setNationality(passengerRequest.nationality());
         
-        if (passengerRequest.getPassengerType() != null) {
-            passenger.setPassengerType(Passenger.PassengerType.valueOf(passengerRequest.getPassengerType().toUpperCase()));
+        if (passengerRequest.passengerType() != null) {
+            passenger.setPassengerType(Passenger.PassengerType.valueOf(passengerRequest.passengerType().toUpperCase()));
         }
 
         passenger = passengerRepository.save(passenger);
@@ -218,22 +217,21 @@ public class PassengerService {
      * @return PassengerResponse DTO
      */
     private PassengerResponse mapToPassengerResponse(Passenger passenger) {
-        PassengerResponse response = new PassengerResponse();
-        response.setId(passenger.getId());
-        response.setFirstName(passenger.getFirstName());
-        response.setLastName(passenger.getLastName());
-        response.setDateOfBirth(passenger.getDateOfBirth());
-        response.setGender(passenger.getGender().name());
-        response.setPassportNumber(passenger.getPassportNumber());
-        response.setNationality(passenger.getNationality());
-        response.setSeatNumber(passenger.getSeatNumber());
-        response.setPassengerType(passenger.getPassengerType().name());
-        response.setBookingId(passenger.getBooking().getId());
-        response.setBookingReference(passenger.getBooking().getBookingReference());
-        response.setFlightNumber(passenger.getBooking().getFlight().getFlightNumber());
-        response.setCreatedAt(passenger.getCreatedAt());
-        response.setUpdatedAt(passenger.getUpdatedAt());
-        
-        return response;
+        return new PassengerResponse(
+                passenger.getId(),
+                passenger.getFirstName(),
+                passenger.getLastName(),
+                passenger.getDateOfBirth(),
+                passenger.getGender().name(),
+                passenger.getPassportNumber(),
+                passenger.getNationality(),
+                passenger.getSeatNumber(),
+                passenger.getPassengerType().name(),
+                passenger.getBooking().getId(),
+                passenger.getBooking().getBookingReference(),
+                passenger.getBooking().getFlight().getFlightNumber(),
+                passenger.getCreatedAt(),
+                passenger.getUpdatedAt()
+        );
     }
 }

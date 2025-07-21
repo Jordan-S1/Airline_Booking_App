@@ -1,6 +1,5 @@
 package com.airlinebookingsystem.dto;
 
-import lombok.Data;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -9,20 +8,19 @@ import java.time.LocalDateTime;
  * Contains comprehensive information about a passenger, including their personal details,
  * booking information, and seat assignment.
  */
-@Data
-public class PassengerResponse {
-    private Long id;
-    private String firstName;
-    private String lastName;
-    private LocalDate dateOfBirth;
-    private String gender;
-    private String passportNumber;
-    private String nationality;
-    private String seatNumber;
-    private String passengerType;
-    private Long bookingId;
-    private String bookingReference;
-    private String flightNumber;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-}
+public record PassengerResponse (
+     Long id,
+     String firstName,
+     String lastName,
+     LocalDate dateOfBirth,
+     String gender,
+     String passportNumber,
+     String nationality,
+     String seatNumber,
+     String passengerType,
+     Long bookingId,
+     String bookingReference,
+     String flightNumber,
+     LocalDateTime createdAt,
+     LocalDateTime updatedAt
+){}

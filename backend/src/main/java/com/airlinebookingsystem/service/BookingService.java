@@ -38,44 +38,44 @@ public class BookingService {
      * @throws RuntimeException if flight or user is not found, or if insufficient seats are available
      */
     public BookingResponse createBooking(BookingRequest request, Long userId) {
-        log.info("Creating booking for user {} and flight {}", userId, request.getFlightId());
+        log.info("Creating booking for user {} and flight {}", userId, request.flightId());
 
         // Validate user
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         // Validate flight
-        Flight flight = flightRepository.findById(request.getFlightId())
+        Flight flight = flightRepository.findById(request.flightId())
                 .orElseThrow(() -> new RuntimeException("Flight not found"));
 
         // Check seat availability
-        if (flight.getAvailableSeats() < request.getPassengers().size()) {
+        if (flight.getAvailableSeats() < request.passengers().size()) {
             throw new RuntimeException("Insufficient seats available");
         }
 
         // Calculate total amount based on seat class
-        BigDecimal totalAmount = calculateTotalAmount(flight, request.getSeatClass(), request.getPassengers().size());
+        BigDecimal totalAmount = calculateTotalAmount(flight, request.seatClass(), request.passengers().size());
 
         // Create a booking entity
         Booking booking = Booking.builder()
                 .bookingReference(generateBookingReference())
                 .user(user)
                 .flight(flight)
-                .numberOfPassengers(request.getPassengers().size())
+                .numberOfPassengers(request.passengers().size())
                 .totalAmount(totalAmount)
                 .status(Booking.BookingStatus.PENDING)
-                .seatClass(Booking.SeatClass.valueOf(request.getSeatClass()))
+                .seatClass(Booking.SeatClass.valueOf(request.seatClass()))
                 .build();
 
         // Save booking first to get ID
         booking = bookingRepository.save(booking);
 
         // Create passengers using PassengerService
-        List<PassengerResponse> createdPassengers = passengerService.createPassengers(request.getPassengers(), booking.getId());
+        List<PassengerResponse> createdPassengers = passengerService.createPassengers(request.passengers(), booking.getId());
         log.info("Created {} passengers for booking {}", createdPassengers.size(), booking.getBookingReference());
 
         // Update flight availability
-        flight.setAvailableSeats(flight.getAvailableSeats() - request.getPassengers().size());
+        flight.setAvailableSeats(flight.getAvailableSeats() - request.passengers().size());
         flightRepository.save(flight);
 
         log.info("Booking created successfully with reference: {}", booking.getBookingReference());
@@ -207,24 +207,15 @@ public class BookingService {
      * @return the total amount for the booking
      */
     private BigDecimal calculateTotalAmount(Flight flight, String seatClass, int numberOfPassengers) {
-        BigDecimal pricePerSeat;
-        
-        switch (seatClass.toUpperCase()) {
-            case "ECONOMY":
-                pricePerSeat = flight.getEconomyPrice() != null ? flight.getEconomyPrice() : flight.getBasePrice();
-                break;
-            case "BUSINESS":
-                pricePerSeat = flight.getBusinessPrice() != null ? flight.getBusinessPrice() : 
-                              flight.getBasePrice().multiply(BigDecimal.valueOf(2));
-                break;
-            case "FIRST":
-                pricePerSeat = flight.getFirstClassPrice() != null ? flight.getFirstClassPrice() : 
-                              flight.getBasePrice().multiply(BigDecimal.valueOf(3));
-                break;
-            default:
-                pricePerSeat = flight.getBasePrice();
-        }
-        
+        BigDecimal pricePerSeat = switch (seatClass.toUpperCase()) {
+            case "ECONOMY" -> flight.getEconomyPrice() != null ? flight.getEconomyPrice() : flight.getBasePrice();
+            case "BUSINESS" -> flight.getBusinessPrice() != null ? flight.getBusinessPrice() :
+                    flight.getBasePrice().multiply(BigDecimal.valueOf(2));
+            case "FIRST" -> flight.getFirstClassPrice() != null ? flight.getFirstClassPrice() :
+                    flight.getBasePrice().multiply(BigDecimal.valueOf(3));
+            default -> flight.getBasePrice();
+        };
+
         return pricePerSeat.multiply(BigDecimal.valueOf(numberOfPassengers));
     }
 
@@ -235,22 +226,21 @@ public class BookingService {
      * @return BookingResponse DTO
      */
     private BookingResponse mapToBookingResponse(Booking booking) {
-        BookingResponse response = new BookingResponse();
-        response.setId(booking.getId());
-        response.setBookingReference(booking.getBookingReference());
-        response.setFlightNumber(booking.getFlight().getFlightNumber());
-        response.setDepartureAirport(booking.getFlight().getDepartureAirport().getCode());
-        response.setArrivalAirport(booking.getFlight().getArrivalAirport().getCode());
-        response.setDepartureTime(booking.getFlight().getDepartureTime());
-        response.setArrivalTime(booking.getFlight().getArrivalTime());
-        response.setNumberOfPassengers(booking.getNumberOfPassengers());
-        response.setTotalAmount(booking.getTotalAmount());
-        response.setStatus(booking.getStatus().name());
-        response.setSeatClass(booking.getSeatClass().name());
-        response.setUserEmail(booking.getUser().getEmail());
-        response.setCreatedAt(booking.getCreatedAt());
-        response.setUpdatedAt(booking.getUpdatedAt());
-        
-        return response;
+        return new BookingResponse(
+                booking.getId(),
+                booking.getBookingReference(),
+                booking.getFlight().getFlightNumber(),
+                booking.getFlight().getDepartureAirport().getCode(),
+                booking.getFlight().getArrivalAirport().getCode(),
+                booking.getFlight().getDepartureTime(),
+                booking.getFlight().getArrivalTime(),
+                booking.getNumberOfPassengers(),
+                booking.getTotalAmount(),
+                booking.getStatus().name(),
+                booking.getSeatClass().name(),
+                booking.getUser().getEmail(),
+                booking.getCreatedAt(),
+                booking.getUpdatedAt()
+        );
     }
 }

@@ -40,10 +40,10 @@ public class PaymentService {
      * @return PaymentResponse containing payment result
      */
     public PaymentResponse processPayment(PaymentRequest paymentRequest) {
-        log.info("Processing payment for booking ID: {}", paymentRequest.getBookingId());
+        log.info("Processing payment for booking ID: {}", paymentRequest.bookingId());
 
         // Validate booking exists and is in valid state
-        Booking booking = validateBookingForPayment(paymentRequest.getBookingId());
+        Booking booking = validateBookingForPayment(paymentRequest.bookingId());
 
         // Check if payment already exists for this booking
         Optional<Payment> existingPayment = paymentRepository.findByBookingId(booking.getId());
@@ -59,8 +59,8 @@ public class PaymentService {
         Payment payment = Payment.builder()
                 .transactionId(transactionId)
                 .booking(booking)
-                .amount(paymentRequest.getAmount())
-                .paymentMethod(paymentRequest.getPaymentMethod())
+                .amount(paymentRequest.amount())
+                .paymentMethod(paymentRequest.paymentMethod())
                 .status(Payment.PaymentStatus.PENDING)
                 .build();
 
@@ -71,9 +71,9 @@ public class PaymentService {
             // Process payment through gateway
             String gatewayResponse = paymentGatewayService.processPayment(
                     transactionId,
-                    paymentRequest.getAmount(),
-                    paymentRequest.getPaymentMethod(),
-                    paymentRequest.getPaymentDetails()
+                    paymentRequest.amount(),
+                    paymentRequest.paymentMethod(),
+                    paymentRequest.paymentDetails()
             );
 
             // Update payment status on success
@@ -278,18 +278,18 @@ public class PaymentService {
      * @return PaymentResponse
      */
     private PaymentResponse convertToResponseDTO(Payment payment) {
-        PaymentResponse response = new PaymentResponse();
-        response.setId(payment.getId());
-        response.setTransactionId(payment.getTransactionId());
-        response.setBookingId(payment.getBooking().getId());
-        response.setBookingReference(payment.getBooking().getBookingReference());
-        response.setAmount(payment.getAmount());
-        response.setPaymentMethod(payment.getPaymentMethod());
-        response.setStatus(payment.getStatus());
-        response.setPaymentGatewayResponse(payment.getPaymentGatewayResponse());
-        response.setCreatedAt(payment.getCreatedAt());
-        response.setUpdatedAt(payment.getUpdatedAt());
-        return response;
+        return new PaymentResponse(
+                payment.getId(),
+                payment.getTransactionId(),
+                payment.getBooking().getId(),
+                payment.getBooking().getBookingReference(),
+                payment.getAmount(),
+                payment.getPaymentMethod(),
+                payment.getStatus(),
+                payment.getPaymentGatewayResponse(),
+                payment.getCreatedAt(),
+                payment.getUpdatedAt()
+        );
     }
 }
 

@@ -1,6 +1,5 @@
 package com.airlinebookingsystem.dto;
 
-import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -9,20 +8,19 @@ import java.time.LocalDateTime;
  * Contains comprehensive information about a booking, including flight details,
  * passenger information, and booking status.
  */
-@Data
-public class BookingResponse {
-    private Long id;
-    private String bookingReference;
-    private String flightNumber;
-    private String departureAirport;
-    private String arrivalAirport;
-    private LocalDateTime departureTime;
-    private LocalDateTime arrivalTime;
-    private Integer numberOfPassengers;
-    private BigDecimal totalAmount;
-    private String status;
-    private String seatClass;
-    private String userEmail;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-}
+public record BookingResponse(
+    Long id,
+    String bookingReference,
+    String flightNumber,
+    String departureAirport,
+    String arrivalAirport,
+    LocalDateTime departureTime,
+    LocalDateTime arrivalTime,
+    Integer numberOfPassengers,
+    BigDecimal totalAmount,
+    String status,
+    String seatClass,
+    String userEmail,
+    LocalDateTime createdAt,
+    LocalDateTime updatedAt
+){}
