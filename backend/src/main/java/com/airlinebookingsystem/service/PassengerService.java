@@ -10,8 +10,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -39,25 +43,21 @@ public class PassengerService {
     public PassengerResponse createPassenger(PassengerRequest passengerRequest, Long bookingId) {
         log.info("Creating passenger for booking: {}", bookingId);
 
+        validatePassengerRequest(passengerRequest);
+
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
-        Passenger passenger = Passenger.builder()
-                .firstName(passengerRequest.firstName())
-                .lastName(passengerRequest.lastName())
-                .dateOfBirth(passengerRequest.dateOfBirth())
-                .gender(Passenger.Gender.valueOf(passengerRequest.gender().toUpperCase()))
-                .passportNumber(passengerRequest.passportNumber())
-                .nationality(passengerRequest.nationality())
-                .passengerType(passengerRequest.passengerType() != null ?
-                              Passenger.PassengerType.valueOf(passengerRequest.passengerType().toUpperCase()) :
-                              Passenger.PassengerType.ADULT)
-                .booking(booking)
-                .build();
+        // Check for duplicate passport in the same booking
+        checkDuplicatePassportInBooking(passengerRequest.passportNumber(), bookingId);
 
+        // Validate booking status allows passenger addition
+        validateBookingForPassengerOperation(booking);
+
+        Passenger passenger = buildPassengerFromRequest(passengerRequest, booking);
         passenger = passengerRepository.save(passenger);
-        log.info("Passenger created successfully with ID: {}", passenger.getId());
 
+        log.info("Passenger created successfully with ID: {}", passenger.getId());
         return mapToPassengerResponse(passenger);
     }
 
@@ -70,6 +70,16 @@ public class PassengerService {
      */
     public List<PassengerResponse> createPassengers(List<PassengerRequest> passengerRequests, Long bookingId) {
         log.info("Creating {} passengers for booking: {}", passengerRequests.size(), bookingId);
+
+        // Check for duplicate passports within the request
+        List<String> passportNumbers = passengerRequests.stream()
+                .map(PassengerRequest::passportNumber)
+                .toList();
+
+        long uniquePassports = passportNumbers.stream().distinct().count();
+        if (uniquePassports != passportNumbers.size()) {
+            throw new RuntimeException("Duplicate passport numbers found in passenger list");
+        }
 
         return passengerRequests.stream()
                 .map(request -> createPassenger(request, bookingId))
@@ -133,6 +143,29 @@ public class PassengerService {
     }
 
     /**
+     * Retrieves all passengers in the system.
+     *
+     * @return List of all PassengerResponse objects
+     */
+    public List<PassengerResponse> getAllPassengers() {
+        log.info("Retrieving all passengers");
+        List<Passenger> passengers = passengerRepository.findAll();
+        return passengers.stream()
+                .map(this::mapToPassengerResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Gets passenger count by booking ID.
+     *
+     * @param bookingId the booking ID
+     * @return count of passengers for the booking
+     */
+    public long getPassengerCountByBooking(Long bookingId) {
+        return passengerRepository.findByBookingId(bookingId).size();
+    }
+
+    /**
      * Updates passenger information.
      *
      * @param id               the ID of the passenger to update
@@ -142,23 +175,24 @@ public class PassengerService {
      */
     public PassengerResponse updatePassenger(Long id, PassengerRequest passengerRequest) {
         log.info("Updating passenger with ID: {}", id);
+
+        validatePassengerRequest(passengerRequest);
+
         Passenger passenger = passengerRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Passenger not found"));
 
-        passenger.setFirstName(passengerRequest.firstName());
-        passenger.setLastName(passengerRequest.lastName());
-        passenger.setDateOfBirth(passengerRequest.dateOfBirth());
-        passenger.setGender(Passenger.Gender.valueOf(passengerRequest.gender().toUpperCase()));
-        passenger.setPassportNumber(passengerRequest.passportNumber());
-        passenger.setNationality(passengerRequest.nationality());
-        
-        if (passengerRequest.passengerType() != null) {
-            passenger.setPassengerType(Passenger.PassengerType.valueOf(passengerRequest.passengerType().toUpperCase()));
+        // Validate booking allows updates
+        validateBookingForPassengerOperation(passenger.getBooking());
+
+        // Check for passport conflicts if the passport is being changed
+        if (!passenger.getPassportNumber().equals(passengerRequest.passportNumber())) {
+            checkDuplicatePassportInBooking(passengerRequest.passportNumber(), passenger.getBooking().getId());
         }
 
+        updatePassengerFields(passenger, passengerRequest);
         passenger = passengerRepository.save(passenger);
-        log.info("Passenger updated successfully with ID: {}", passenger.getId());
 
+        log.info("Passenger updated successfully with ID: {}", passenger.getId());
         return mapToPassengerResponse(passenger);
     }
 
@@ -175,7 +209,10 @@ public class PassengerService {
         Passenger passenger = passengerRepository.findById(passengerId)
                 .orElseThrow(() -> new RuntimeException("Passenger not found"));
 
-        passenger.setSeatNumber(seatNumber);
+        // Check if a seat is already assigned to another passenger on the same flight
+        validateSeatAvailability(passenger.getBooking().getFlight().getId(), seatNumber, passengerId);
+
+        passenger.setSeatNumber(seatNumber.trim().toUpperCase());
         passenger = passengerRepository.save(passenger);
 
         log.info("Seat assigned successfully to passenger: {}", passengerId);
@@ -186,28 +223,135 @@ public class PassengerService {
      * Removes a passenger from the system.
      *
      * @param id the ID of the passenger to delete
-     * @throws RuntimeException if a passenger is not found
+     * @throws RuntimeException if a passenger is not found or deletion is not allowed
      */
     public void deletePassenger(Long id) {
         log.info("Deleting passenger with ID: {}", id);
-        if (!passengerRepository.existsById(id)) {
-            throw new RuntimeException("Passenger not found");
-        }
+        Passenger passenger = passengerRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Passenger not found with ID: " + id));
+
+        validateBookingForPassengerOperation(passenger.getBooking());
+
         passengerRepository.deleteById(id);
         log.info("Passenger deleted successfully with ID: {}", id);
     }
 
+    // Private helper methods
+
     /**
-     * Retrieves all passengers in the system.
-     *
-     * @return List of all PassengerResponse objects
+     * Validates passenger request data.
      */
-    public List<PassengerResponse> getAllPassengers() {
-        log.info("Retrieving all passengers");
-        List<Passenger> passengers = passengerRepository.findAll();
-        return passengers.stream()
-                .map(this::mapToPassengerResponse)
-                .collect(Collectors.toList());
+    private void validatePassengerRequest(PassengerRequest request) {
+        if (!StringUtils.hasText(request.firstName())) {
+            throw new RuntimeException("First name is required");
+        }
+        if (!StringUtils.hasText(request.lastName())) {
+            throw new RuntimeException("Last name is required");
+        }
+        if (request.dateOfBirth() == null) {
+            throw new RuntimeException("Date of birth is required");
+        }
+        if (request.dateOfBirth().isAfter(LocalDate.now())) {
+            throw new RuntimeException("Date of birth cannot be in the future");
+        }
+        if (!StringUtils.hasText(request.passportNumber())) {
+            throw new RuntimeException("Passport number is required");
+        }
+        if (!StringUtils.hasText(request.nationality())) {
+            throw new RuntimeException("Nationality is required");
+        }
+
+        // Validate age restrictions
+        int age = Period.between(request.dateOfBirth(), LocalDate.now()).getYears();
+        if (age > 120) {
+            throw new RuntimeException("Invalid date of birth - age cannot exceed 120 years");
+        }
+    }
+
+    /**
+     * Checks for duplicate passport numbers within the same booking.
+     */
+    private void checkDuplicatePassportInBooking(String passportNumber, Long bookingId) {
+        List<Passenger> existingPassengers = passengerRepository.findByBookingId(bookingId);
+        boolean duplicateExists = existingPassengers.stream()
+                .anyMatch(p -> p.getPassportNumber().equalsIgnoreCase(passportNumber.trim()));
+
+        if (duplicateExists) {
+            throw new RuntimeException(passportNumber);
+        }
+    }
+
+    /**
+     * Validates that the booking allows passenger operations.
+     */
+    private void validateBookingForPassengerOperation(Booking booking) {
+        if (booking.getStatus() == Booking.BookingStatus.CONFIRMED) {
+            throw new RuntimeException("Cannot modify passengers in confirmed booking");
+        }
+        if (booking.getStatus() == Booking.BookingStatus.CANCELLED) {
+            throw new RuntimeException("Cannot modify passengers in cancelled booking");
+        }
+    }
+
+    /**
+     * Validates seat availability on the flight.
+     */
+    private void validateSeatAvailability(Long flightId, String seatNumber, Long currentPassengerId) {
+        List<Passenger> flightPassengers = passengerRepository.findByFlightId(flightId);
+        Optional<Passenger> conflictingPassenger = flightPassengers.stream()
+                .filter(p -> seatNumber.equalsIgnoreCase(p.getSeatNumber()) &&
+                        !p.getId().equals(currentPassengerId))
+                .findFirst();
+
+        if (conflictingPassenger.isPresent()) {
+            throw new RuntimeException("Seat " + seatNumber + " is already assigned");
+        }
+    }
+
+    /**
+     * Builds a Passenger entity from a PassengerRequest.
+     */
+    private Passenger buildPassengerFromRequest(PassengerRequest request, Booking booking) {
+        return Passenger.builder()
+                .firstName(request.firstName().trim())
+                .lastName(request.lastName().trim())
+                .dateOfBirth(request.dateOfBirth())
+                .gender(Passenger.Gender.valueOf(request.gender().toUpperCase()))
+                .passportNumber(request.passportNumber().trim().toUpperCase())
+                .nationality(request.nationality().trim())
+                .passengerType(request.passengerType() != null ?
+                        Passenger.PassengerType.valueOf(request.passengerType().toUpperCase()) :
+                        determinePassengerType(request.dateOfBirth()))
+                .booking(booking)
+                .build();
+    }
+
+    /**
+     * Updates passenger fields from request.
+     */
+    private void updatePassengerFields(Passenger passenger, PassengerRequest request) {
+        passenger.setFirstName(request.firstName().trim());
+        passenger.setLastName(request.lastName().trim());
+        passenger.setDateOfBirth(request.dateOfBirth());
+        passenger.setGender(Passenger.Gender.valueOf(request.gender().toUpperCase()));
+        passenger.setPassportNumber(request.passportNumber().trim().toUpperCase());
+        passenger.setNationality(request.nationality().trim());
+
+        if (request.passengerType() != null) {
+            passenger.setPassengerType(Passenger.PassengerType.valueOf(request.passengerType().toUpperCase()));
+        } else {
+            passenger.setPassengerType(determinePassengerType(request.dateOfBirth()));
+        }
+    }
+
+    /**
+     * Determines a passenger type based on age.
+     */
+    private Passenger.PassengerType determinePassengerType(LocalDate dateOfBirth) {
+        int age = Period.between(dateOfBirth, LocalDate.now()).getYears();
+        if (age < 2) return Passenger.PassengerType.INFANT;
+        if (age < 12) return Passenger.PassengerType.CHILD;
+        return Passenger.PassengerType.ADULT;
     }
 
     /**

@@ -4,9 +4,11 @@ import com.airlinebookingsystem.dto.FlightSearchRequest;
 import com.airlinebookingsystem.dto.FlightSearchResponse;
 import com.airlinebookingsystem.dto.FlightSearchResult;
 import com.airlinebookingsystem.entity.Airport;
+import com.airlinebookingsystem.entity.Booking;
 import com.airlinebookingsystem.entity.Flight;
 import com.airlinebookingsystem.repository.AirportRepository;
 import com.airlinebookingsystem.repository.FlightRepository;
+import com.airlinebookingsystem.util.SeatClassUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -164,12 +166,8 @@ public class FlightService {
      * @return true if enough seats are available, false otherwise
      */
     private boolean hasEnoughSeats(Flight flight, int passengers, String seatClass) {
-        return switch (seatClass.toUpperCase()) {
-            case "ECONOMY" -> flight.getEconomySeats() >= passengers;
-            case "BUSINESS" -> flight.getBusinessSeats() >= passengers;
-            case "FIRST" -> flight.getFirstClassSeats() >= passengers;
-            default -> flight.getAvailableSeats() >= passengers;
-        };
+        Booking.SeatClass seatClassEnum = SeatClassUtils.parseSeatClass(seatClass);
+        return SeatClassUtils.hasEnoughSeats(flight, seatClassEnum, passengers);
     }
 
     /**
@@ -194,15 +192,8 @@ public class FlightService {
      * @return the price for the specified seat class
      */
     private BigDecimal getPriceForSeatClass(Flight flight, String seatClass) {
-        return switch (seatClass.toUpperCase()) {
-            case "ECONOMY" -> flight.getEconomyPrice() != null ?
-                    flight.getEconomyPrice() : flight.getBasePrice();
-            case "BUSINESS" -> flight.getBusinessPrice() != null ?
-                    flight.getBusinessPrice() : flight.getBasePrice().multiply(BigDecimal.valueOf(2));
-            case "FIRST" -> flight.getFirstClassPrice() != null ?
-                    flight.getFirstClassPrice() : flight.getBasePrice().multiply(BigDecimal.valueOf(3));
-            default -> flight.getBasePrice();
-        };
+        Booking.SeatClass seatClassEnum = SeatClassUtils.parseSeatClass(seatClass);
+        return SeatClassUtils.getPriceForSeatClass(flight, seatClassEnum);
     }
 
     /**
@@ -213,12 +204,8 @@ public class FlightService {
      * @return the number of available seats in the specified class
      */
     private Integer getAvailableSeatsForClass(Flight flight, String seatClass) {
-        return switch (seatClass.toUpperCase()) {
-            case "ECONOMY" -> flight.getEconomySeats();
-            case "BUSINESS" -> flight.getBusinessSeats();
-            case "FIRST" -> flight.getFirstClassSeats();
-            default -> flight.getAvailableSeats();
-        };
+        Booking.SeatClass seatClassEnum = SeatClassUtils.parseSeatClass(seatClass);
+        return SeatClassUtils.getAvailableSeatsForClass(flight, seatClassEnum);
     }
 
     /**
