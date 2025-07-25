@@ -93,7 +93,7 @@ public class FlightService {
         List<FlightSearchResponse> returnFlights = null;
         boolean isRoundTrip = request.returnDate() != null;
 
-        // Search return flights if return date is provided
+        // Search return flights if a return date is provided
         if (isRoundTrip) {
             log.info("Searching return flights from {} to {} on {}",
                     request.arrivalAirport(),
